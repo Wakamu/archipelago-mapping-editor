@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+# PyInstaller
+build/
+dist/
+# Local testing / user data
+custom_worlds/
+# IDE
+.vs/
+.idea/
+.vscode/
+# Environment
+.env
