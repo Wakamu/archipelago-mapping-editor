@@ -15,6 +15,7 @@ a = Analysis(
         "tab_tree",
         "mapping_preset_io",
         "apworld_support",
+        "poptracker_import",
     ],
     hookspath=[],
     hooksconfig={},

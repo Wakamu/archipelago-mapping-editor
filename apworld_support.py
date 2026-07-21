@@ -137,11 +137,29 @@ def bootstrap_archipelago() -> Path:
     except ImportError as exc:
         message = str(exc).lower()
         if "bad magic number" in message or "bad magic" in message:
+            py_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+            if layout == "release":
+                hint = (
+                    "This is a packaged Archipelago release, and its world files were built "
+                    f"for a different Python than {py_ver}.\n\n"
+                    "Fix options:\n"
+                    "  1. Set ARCHIPELAGO_PATH to an Archipelago source checkout "
+                    "(folder with worlds/ and Utils.py), then run this editor with "
+                    "Python 3.11.9–3.13, or\n"
+                    "  2. On Windows, rebuild/run the editor with Python 3.13 against "
+                    "the official installed release, or\n"
+                    "  3. On Linux, prefer a source checkout — the AppImage/tar.gz "
+                    "release often uses a different embedded Python than your system Python."
+                )
+            else:
+                hint = (
+                    f"Python {py_ver} cannot load the world files at this path.\n\n"
+                    "Use Python 3.11.9–3.13 with an Archipelago source checkout, "
+                    "or match the Python version used to build that Archipelago install."
+                )
             raise RuntimeError(
-                f"Found Archipelago at {root}, but Python {sys.version_info.major}."
-                f"{sys.version_info.minor} cannot load its world files.\n\n"
-                "Rebuild this editor with Python 3.13 (installed Archipelago release), "
-                "or set ARCHIPELAGO_PATH to a source Archipelago checkout and use Python 3.11.9+."
+                f"Found Archipelago at {root}, but Python {py_ver} cannot load its world files.\n\n"
+                f"{hint}"
             ) from exc
         raise
 

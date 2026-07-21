@@ -33,6 +33,7 @@ from mapping_preset_io import (  # noqa: E402
     save_preset,
     suggest_preset_filename,
 )
+from poptracker_import import import_poptracker_pack  # noqa: E402
 from tab_tree import (  # noqa: E402
     is_branch_tab,
     is_leaf_tab,
@@ -77,36 +78,46 @@ class ManageTabsDialog(tk.Toplevel):
         super().__init__(parent)
         self.parent = parent
         self.title("Manage map tabs")
-        self.geometry("560x420")
+        self.geometry("640x440")
+        self.minsize(520, 360)
         self.transient(parent)
         self.grab_set()
 
         ttk.Label(
             self,
             text="Folders group nested map tabs. Map tabs hold a background image and location pins.",
-            wraplength=520,
+            wraplength=600,
         ).pack(anchor=tk.W, padx=10, pady=(10, 6))
 
-        frame = ttk.Frame(self)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10)
-        self.tree = ttk.Treeview(frame, selectmode="browse")
-        scroll = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.tree.yview)
+        body = ttk.Frame(self)
+        body.pack(fill=tk.BOTH, expand=True, padx=10)
+
+        tree_frame = ttk.Frame(body)
+        tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.tree = ttk.Treeview(tree_frame, selectmode="browse")
+        scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.refresh()
+        self.tree.bind("<Delete>", lambda _e: self.remove_tab())
 
-        buttons = ttk.Frame(self)
-        buttons.pack(fill=tk.X, padx=10, pady=8)
-        ttk.Button(buttons, text="Add map tab...", command=self.add_map_tab).pack(side=tk.LEFT)
-        ttk.Button(buttons, text="Add folder...", command=self.add_folder).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Add child...", command=self.add_child).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Rename", command=self.rename_tab).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Move up", command=self.move_tab_up).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Move down", command=self.move_tab_down).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Change image...", command=self.change_image).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Remove", command=self.remove_tab).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+        actions = ttk.Frame(body)
+        actions.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        ttk.Button(actions, text="Add map tab...", command=self.add_map_tab).pack(fill=tk.X, pady=(0, 4))
+        ttk.Button(actions, text="Add folder...", command=self.add_folder).pack(fill=tk.X, pady=(0, 4))
+        ttk.Button(actions, text="Add child...", command=self.add_child).pack(fill=tk.X, pady=(0, 4))
+        ttk.Separator(actions, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=6)
+        ttk.Button(actions, text="Rename", command=self.rename_tab).pack(fill=tk.X, pady=(0, 4))
+        ttk.Button(actions, text="Move up", command=self.move_tab_up).pack(fill=tk.X, pady=(0, 4))
+        ttk.Button(actions, text="Move down", command=self.move_tab_down).pack(fill=tk.X, pady=(0, 4))
+        ttk.Button(actions, text="Change image...", command=self.change_image).pack(fill=tk.X, pady=(0, 4))
+        ttk.Button(actions, text="Remove", command=self.remove_tab).pack(fill=tk.X, pady=(0, 4))
+
+        footer = ttk.Frame(self)
+        footer.pack(fill=tk.X, padx=10, pady=8)
+        ttk.Button(footer, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+
+        self.refresh()
 
     def refresh(self) -> None:
         self.tree.delete(*self.tree.get_children())
@@ -276,11 +287,18 @@ class ManageTabsDialog(tk.Toplevel):
     def remove_tab(self) -> None:
         path = self._selected_path()
         if path is None:
+            messagebox.showwarning("Remove tab", "Select a tab to remove.", parent=self)
             return
         tab = tab_at_path(self.parent.preset.tabs, path)
         if tab is None:
             return
-        if not messagebox.askyesno("Remove tab", f"Remove tab '{tab.name}'?", parent=self):
+        if is_branch_tab(tab) and tab.children:
+            prompt = (
+                f"Remove folder '{tab.name}' and all {len(tab.children)} child tab(s) inside it?"
+            )
+        else:
+            prompt = f"Remove tab '{tab.name}'?"
+        if not messagebox.askyesno("Remove tab", prompt, parent=self):
             return
         siblings = self._parent_tabs(path)
         siblings.pop(path[-1])
@@ -423,6 +441,12 @@ class MappingPresetEditor(tk.Tk):
         self.new_preset_button.pack(side=tk.LEFT, padx=4)
         self.load_preset_button = ttk.Button(toolbar, text="Load Preset...", command=self.load_preset_dialog)
         self.load_preset_button.pack(side=tk.LEFT, padx=4)
+        self.import_poptracker_button = ttk.Button(
+            toolbar,
+            text="Import PopTracker...",
+            command=self.import_poptracker_dialog,
+        )
+        self.import_poptracker_button.pack(side=tk.LEFT, padx=4)
         self.save_preset_button = ttk.Button(toolbar, text="Save Preset...", command=self.save_preset_dialog)
         self.save_preset_button.pack(side=tk.LEFT, padx=4)
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
@@ -465,12 +489,30 @@ class MappingPresetEditor(tk.Tk):
         side = ttk.Frame(body, padding=(8, 0))
         body.add(side, weight=1)
         ttk.Label(side, text="Selection", font=("Segoe UI", 10, "bold")).pack(anchor=tk.W)
-        self.detail_var = tk.StringVar(
-            value="Open an APWorld, then right-click the map to add locations or groups.\n"
+        ttk.Button(side, text="Delete selected pin", command=self.delete_selected_marker).pack(
+            side=tk.BOTTOM, anchor=tk.W, pady=(8, 0)
+        )
+        detail_frame = ttk.Frame(side)
+        detail_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        self.detail_text = tk.Text(
+            detail_frame,
+            wrap=tk.WORD,
+            height=8,
+            width=36,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            padx=0,
+            pady=0,
+        )
+        detail_scroll = ttk.Scrollbar(detail_frame, orient=tk.VERTICAL, command=self.detail_text.yview)
+        self.detail_text.configure(yscrollcommand=detail_scroll.set, state=tk.DISABLED)
+        self.detail_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        detail_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._set_detail_text(
+            "Open an APWorld, then right-click the map to add locations or groups.\n"
             "Drag pins to move. Hold Shift while dragging to snap to a 16px grid."
         )
-        ttk.Label(side, textvariable=self.detail_var, wraplength=280, justify=tk.LEFT).pack(anchor=tk.W, pady=(6, 10))
-        ttk.Button(side, text="Delete selected pin", command=self.delete_selected_marker).pack(anchor=tk.W)
 
         self.canvas.bind("<ButtonPress-1>", self._on_canvas_press)
         self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
@@ -529,6 +571,7 @@ class MappingPresetEditor(tk.Tk):
         state = "normal" if self.preset.game and self.locations else "disabled"
         self.new_preset_button.configure(state=state)
         self.load_preset_button.configure(state=state)
+        self.import_poptracker_button.configure(state=state)
         self.save_preset_button.configure(state=state)
 
     def _refresh_tab_selectors(self) -> None:
@@ -652,19 +695,25 @@ class MappingPresetEditor(tk.Tk):
             )
         self._update_detail()
 
+    def _set_detail_text(self, text: str) -> None:
+        self.detail_text.configure(state=tk.NORMAL)
+        self.detail_text.delete("1.0", tk.END)
+        self.detail_text.insert("1.0", text)
+        self.detail_text.configure(state=tk.DISABLED)
+
     def _update_detail(self) -> None:
         tab = self.active_tab
         branch = tab_at_path(self.preset.tabs, self.active_tab_path)
         if tab is None:
             if branch and is_branch_tab(branch):
                 child_count = len(branch.children)
-                self.detail_var.set(
+                self._set_detail_text(
                     f"Folder: {branch.name}\n"
                     f"Child tabs: {child_count}\n\n"
                     "Use Manage tabs to add map tabs inside this folder."
                 )
             else:
-                self.detail_var.set("Create a preset tab to begin.")
+                self._set_detail_text("Create a preset tab to begin.")
             return
         lines = [f"Tab: {path_to_label(self.preset.tabs, self.active_tab_path)}", f"Markers: {len(tab.markers)}"]
         if self.selected_marker is not None and 0 <= self.selected_marker < len(tab.markers):
@@ -676,7 +725,7 @@ class MappingPresetEditor(tk.Tk):
             lines.append("Locations:")
             for location in marker.locations:
                 lines.append(f"  - {location}")
-        self.detail_var.set("\n".join(lines))
+        self._set_detail_text("\n".join(lines))
 
     def _clamp_map_pos(self, x: int, y: int) -> tuple[int, int]:
         return max(0, min(self.map_width, x)), max(0, min(self.map_height, y))
@@ -862,6 +911,68 @@ class MappingPresetEditor(tk.Tk):
         self.active_tab_path = [0]
         self.selected_marker = None
         self.dirty = True
+        self._refresh_tab_selectors()
+        self._load_active_map_image()
+        self._redraw()
+
+    def import_poptracker_dialog(self) -> None:
+        if not self.preset.game:
+            messagebox.showwarning("Import PopTracker", "Open an APWorld first.")
+            return
+        if self.dirty and not messagebox.askyesno("Import PopTracker", "Discard unsaved changes?"):
+            return
+
+        pack_path = filedialog.askopenfilename(
+            parent=self,
+            title="Import PopTracker pack (zip)",
+            filetypes=[("PopTracker zip", "*.zip"), ("All files", "*.*")],
+        )
+        if not pack_path:
+            pack_path = filedialog.askdirectory(
+                parent=self,
+                title="Import PopTracker pack (folder)",
+            )
+        if not pack_path:
+            return
+
+        try:
+            result = import_poptracker_pack(Path(pack_path), game=self.preset.game)
+        except Exception as exc:
+            messagebox.showerror("Import PopTracker", str(exc))
+            return
+
+        if self._preset_temp is not None:
+            self._preset_temp.cleanup()
+
+        self._preset_temp = result.temp_dir
+        self.preset = result.preset
+        self.active_tab_path = resolve_leaf_path(result.preset.tabs, [0]) if result.preset.tabs else []
+        self.selected_marker = None
+        self.dirty = True
+        self.canonicalize_preset_locations()
+
+        aliases = build_location_aliases(self.locations)
+        unmatched = sorted(
+            name
+            for name in result.stats.location_names
+            if name not in aliases and normalize_location_name(name) not in aliases
+        )
+
+        lines = [
+            f"Imported {result.stats.tab_count} map tab(s) with {result.stats.marker_count} pin(s).",
+            f"Unique locations on maps: {len(result.stats.location_names)}",
+        ]
+        if unmatched:
+            preview = ", ".join(unmatched[:8])
+            if len(unmatched) > 8:
+                preview += f", ... (+{len(unmatched) - 8} more)"
+            lines.append(f"Not found in APWorld ({len(unmatched)}): {preview}")
+        if result.stats.warnings:
+            lines.append("")
+            lines.extend(result.stats.warnings)
+
+        messagebox.showinfo("Import PopTracker", "\n".join(lines))
+        self._update_game_label()
         self._refresh_tab_selectors()
         self._load_active_map_image()
         self._redraw()
