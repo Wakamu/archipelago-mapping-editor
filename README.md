@@ -1,6 +1,6 @@
 # Archipelago Mapping Preset Editor
 
-Standalone desktop app for creating mapping preset zip files used by [Archipelago Visual Tracker](https://github.com/ArchipelagoMW/Archipelago).
+Standalone desktop app for creating mapping preset zip files used by [Archipelago Visual Tracker](https://github.com/Wakamu/Archipelago).
 
 ## Requirements
 
