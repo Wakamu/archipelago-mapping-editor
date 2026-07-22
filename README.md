@@ -4,7 +4,7 @@ Standalone desktop app for creating mapping preset zip files used by [Archipelag
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11.9–3.13
 - An [Archipelago](https://github.com/ArchipelagoMW/Archipelago) installation (source checkout or installed copy)
 - Pillow (recommended, for PNG/JPEG/WebP map backgrounds)
 
@@ -22,6 +22,21 @@ set ARCHIPELAGO_PATH=C:\Users\User\Projects\Archipelago
 ```
 
 On a typical Windows install the editor also checks `C:\ProgramData\Archipelago`.
+
+### Linux / source checkout
+
+Packaged Linux Archipelago releases often use a different Python than your system Python, so prefer a **source checkout**:
+
+```bash
+git clone https://github.com/ArchipelagoMW/Archipelago.git
+cd Archipelago
+python ModuleUpdate.py          # installs Archipelago deps (schema, etc.)
+export ARCHIPELAGO_PATH="$PWD"
+cd ../archipelago-mapping-editor
+python editor.py
+```
+
+`ModuleUpdate.py` must be run with the **same** Python interpreter you use for the mapping editor.
 
 ## Run
 

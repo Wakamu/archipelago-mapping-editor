@@ -315,13 +315,24 @@ class ManageTabsDialog(tk.Toplevel):
 
 
 class LocationPickerDialog(tk.Toplevel):
-    def __init__(self, parent: MappingPresetEditor, title: str, locations: list[str], *, group: bool = False) -> None:
+    def __init__(
+        self,
+        parent: MappingPresetEditor,
+        title: str,
+        locations: list[str],
+        *,
+        group: bool = False,
+        preselected: list[str] | None = None,
+        initial_label: str | None = None,
+        confirm_label: str = "Add",
+    ) -> None:
         super().__init__(parent)
         self.parent = parent
         self.result: Marker | None = None
         self.group = group
         self.tab_usage = parent.location_tab_counts()
         self._filtered_locations: list[str] = []
+        self._chosen: set[str] = set(preselected or [])
         self.title(title)
         self.geometry("520x520")
         self.transient(parent)
@@ -329,31 +340,33 @@ class LocationPickerDialog(tk.Toplevel):
 
         ttk.Label(self, text=title, font=("Segoe UI", 10, "bold")).pack(anchor=tk.W, padx=10, pady=(10, 4))
         self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", lambda *_: self._render())
+        self.search_var.trace_add("write", lambda *_: self._on_search_changed())
         ttk.Entry(self, textvariable=self.search_var).pack(fill=tk.X, padx=10, pady=(0, 8))
 
         if group:
             ttk.Label(self, text="Group label (optional):").pack(anchor=tk.W, padx=10)
-            self.label_var = tk.StringVar()
+            self.label_var = tk.StringVar(value=initial_label or "")
             ttk.Entry(self, textvariable=self.label_var).pack(fill=tk.X, padx=10, pady=(0, 8))
 
         list_frame = ttk.Frame(self)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10)
         if group:
-            self.listbox = tk.Listbox(list_frame, selectmode=tk.EXTENDED, activestyle="none")
+            self.listbox = tk.Listbox(list_frame, selectmode=tk.EXTENDED, activestyle="none", exportselection=False)
         else:
-            self.listbox = tk.Listbox(list_frame, activestyle="none")
+            self.listbox = tk.Listbox(list_frame, activestyle="none", exportselection=False)
         scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.listbox.yview)
         self.listbox.configure(yscrollcommand=scroll.set)
         self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.locations = locations
         self._render()
+        if group:
+            self.listbox.bind("<<ListboxSelect>>", lambda _e: self._sync_chosen_from_listbox())
 
         buttons = ttk.Frame(self)
         buttons.pack(fill=tk.X, padx=10, pady=10)
         ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side=tk.RIGHT)
-        ttk.Button(buttons, text="Add", command=self._confirm).pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(buttons, text=confirm_label, command=self._confirm).pack(side=tk.RIGHT, padx=(0, 8))
         if not group:
             self.listbox.bind("<Double-Button-1>", lambda _e: self._confirm())
 
@@ -361,6 +374,18 @@ class LocationPickerDialog(tk.Toplevel):
     def _format_location_label(location: str, tab_count: int) -> str:
         tab_word = "tab" if tab_count == 1 else "tabs"
         return f"{location} ({tab_count} {tab_word})"
+
+    def _sync_chosen_from_listbox(self) -> None:
+        if not self.group:
+            return
+        visible = set(self._filtered_locations)
+        selected_visible = {self._filtered_locations[i] for i in self.listbox.curselection()}
+        self._chosen -= visible
+        self._chosen |= selected_visible
+
+    def _on_search_changed(self) -> None:
+        self._sync_chosen_from_listbox()
+        self._render()
 
     def _render(self) -> None:
         self.listbox.delete(0, tk.END)
@@ -372,12 +397,17 @@ class LocationPickerDialog(tk.Toplevel):
             tab_count = self.tab_usage.get(location, 0)
             self.listbox.insert(tk.END, self._format_location_label(location, tab_count))
             self._filtered_locations.append(location)
+        if self.group:
+            for index, location in enumerate(self._filtered_locations):
+                if location in self._chosen:
+                    self.listbox.selection_set(index)
 
     def _confirm(self) -> None:
         if self.group:
-            selected = [self._filtered_locations[i] for i in self.listbox.curselection()]
+            self._sync_chosen_from_listbox()
+            selected = [location for location in self.locations if location in self._chosen]
             if not selected:
-                messagebox.showwarning("Add group", "Select at least one location.", parent=self)
+                messagebox.showwarning(self.title(), "Select at least one location.", parent=self)
                 return
             label = self.label_var.get().strip() or f"{len(selected)} locations"
             self.result = Marker(x=0, y=0, locations=selected, label=label)
@@ -489,9 +519,6 @@ class MappingPresetEditor(tk.Tk):
         side = ttk.Frame(body, padding=(8, 0))
         body.add(side, weight=1)
         ttk.Label(side, text="Selection", font=("Segoe UI", 10, "bold")).pack(anchor=tk.W)
-        ttk.Button(side, text="Delete selected pin", command=self.delete_selected_marker).pack(
-            side=tk.BOTTOM, anchor=tk.W, pady=(8, 0)
-        )
         detail_frame = ttk.Frame(side)
         detail_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
         self.detail_text = tk.Text(
@@ -511,7 +538,7 @@ class MappingPresetEditor(tk.Tk):
         detail_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self._set_detail_text(
             "Open an APWorld, then right-click the map to add locations or groups.\n"
-            "Drag pins to move. Hold Shift while dragging to snap to a 16px grid."
+            "Right-click a pin to edit or delete it. Drag pins to move; hold Shift to snap to a 16px grid."
         )
 
         self.canvas.bind("<ButtonPress-1>", self._on_canvas_press)
@@ -764,18 +791,27 @@ class MappingPresetEditor(tk.Tk):
         self.canvas.xview_moveto(max(0.0, min(1.0, (sx - 200) / max(1, width))))
         self.canvas.yview_moveto(max(0.0, min(1.0, (sy - 200) / max(1, height))))
 
-    def _on_canvas_press(self, event: tk.Event) -> None:
-        cx, cy = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+    def _marker_at_canvas(self, cx: float, cy: float) -> int | None:
         for item in reversed(self.canvas.find_overlapping(cx, cy, cx, cy)):
             for tag in self.canvas.gettags(item):
                 if tag.startswith("marker:"):
-                    index = int(tag.split(":", 1)[1])
-                    self._select_marker(index)
-                    marker = self.active_tab.markers[index]
-                    self.drag_marker = index
-                    self.drag_offset = (cx - marker.x * self.scale, cy - marker.y * self.scale)
-                    return
-        self._select_marker(None)
+                    return int(tag.split(":", 1)[1])
+        return None
+
+    @staticmethod
+    def _is_group_marker(marker: Marker) -> bool:
+        return len(marker.locations) > 1 or bool(marker.label)
+
+    def _on_canvas_press(self, event: tk.Event) -> None:
+        cx, cy = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        index = self._marker_at_canvas(cx, cy)
+        if index is None or self.active_tab is None:
+            self._select_marker(None)
+            return
+        self._select_marker(index)
+        marker = self.active_tab.markers[index]
+        self.drag_marker = index
+        self.drag_offset = (cx - marker.x * self.scale, cy - marker.y * self.scale)
 
     def _on_canvas_drag(self, event: tk.Event) -> None:
         if self.drag_marker is None or self.active_tab is None:
@@ -803,7 +839,21 @@ class MappingPresetEditor(tk.Tk):
             return
         cx, cy = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
         x, y = self._canvas_to_map(cx, cy)
+        marker_index = self._marker_at_canvas(cx, cy)
         menu = tk.Menu(self, tearoff=0)
+        if marker_index is not None:
+            self._select_marker(marker_index)
+            marker = self.active_tab.markers[marker_index]
+            if self._is_group_marker(marker):
+                menu.add_command(
+                    label="Edit group...",
+                    command=lambda index=marker_index: self._edit_group_marker(index),
+                )
+            menu.add_command(
+                label="Delete pin",
+                command=lambda index=marker_index: self._delete_marker_at(index),
+            )
+            menu.add_separator()
         menu.add_command(label="Add location...", command=lambda: self._add_location_at(x, y))
         menu.add_command(label="Add group...", command=lambda: self._add_group_at(x, y))
         menu.tk_popup(event.x_root, event.y_root)
@@ -828,15 +878,44 @@ class MappingPresetEditor(tk.Tk):
         self.dirty = True
         self._select_marker(len(self.active_tab.markers) - 1, focus=True)
 
-    def delete_selected_marker(self) -> None:
+    def _edit_group_marker(self, index: int) -> None:
         tab = self.active_tab
-        if tab is None or self.selected_marker is None:
+        if tab is None or index < 0 or index >= len(tab.markers):
             return
-        if 0 <= self.selected_marker < len(tab.markers):
-            tab.markers.pop(self.selected_marker)
-            self.selected_marker = None
-            self.dirty = True
-            self._redraw()
+        marker = tab.markers[index]
+        if not self._is_group_marker(marker):
+            return
+        dialog = LocationPickerDialog(
+            self,
+            "Edit group",
+            self.locations,
+            group=True,
+            preselected=list(marker.locations),
+            initial_label=marker.label or "",
+            confirm_label="Save",
+        )
+        self.wait_window(dialog)
+        if dialog.result is None or self.active_tab is None:
+            return
+        marker.locations = list(dialog.result.locations)
+        marker.label = dialog.result.label
+        self.dirty = True
+        self._select_marker(index)
+        self._redraw()
+
+    def _delete_marker_at(self, index: int) -> None:
+        tab = self.active_tab
+        if tab is None or index < 0 or index >= len(tab.markers):
+            return
+        tab.markers.pop(index)
+        self.selected_marker = None
+        self.dirty = True
+        self._redraw()
+
+    def delete_selected_marker(self) -> None:
+        if self.selected_marker is None:
+            return
+        self._delete_marker_at(self.selected_marker)
 
     def _nudge(self, dx: int, dy: int) -> None:
         tab = self.active_tab

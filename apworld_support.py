@@ -161,6 +161,18 @@ def bootstrap_archipelago() -> Path:
                 f"Found Archipelago at {root}, but Python {py_ver} cannot load its world files.\n\n"
                 f"{hint}"
             ) from exc
+        if layout == "source" and isinstance(exc, ModuleNotFoundError):
+            missing = getattr(exc, "name", None) or str(exc)
+            raise RuntimeError(
+                f"Found Archipelago source at {root}, but a required Python package "
+                f"is missing ({missing}).\n\n"
+                "Install Archipelago's dependencies in the same Python you use to run "
+                "this editor, from the Archipelago folder:\n\n"
+                "  python ModuleUpdate.py\n\n"
+                "Or, with pip:\n"
+                "  python -m pip install -r requirements.txt\n\n"
+                "Then run the mapping editor again."
+            ) from exc
         raise
 
     return root
